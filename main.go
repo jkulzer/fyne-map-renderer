@@ -8,7 +8,7 @@ import (
 	// "fyne.io/fyne/v2/dialog"
 
 	"context"
-	"time"
+	// "time"
 	// "encoding/json"
 	"fmt"
 	"image/color"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geojson"
+	"github.com/paulmach/orb/project"
 
 	"github.com/rs/zerolog/log"
 )
@@ -63,77 +64,79 @@ func main() {
 
 	w.SetContent(content)
 
-	go func() {
-		time.Sleep(time.Second)
-		var lines []canvas.Line
+	// time.Sleep(time.Millisecond * 10)
+	var lines []canvas.Line
 
-		// contentSize := content.Size()
+	// contentSize := content.Size()
 
-		for _, feature := range parsedFC.Features {
-			fmt.Println(feature.Type)
-			if feature.Geometry.GeoJSONType() == "LineString" {
-				lineString := feature.Geometry.(orb.LineString)
-				lsLastIndex := len(lineString) - 1
-				for lsIndex, point := range lineString {
-					if lsIndex != lsLastIndex {
-						// latOffset := float32(52.337)
+	var boundStartPoint orb.Point
+	var boundEndPoint orb.Point
+	boundStartPoint[1] = 52.678 // latitude
+	boundStartPoint[0] = 13.079 // longitude
 
-						latOffset := float32(52.678)
-						lonOffset := float32(13.079)
+	boundEndPoint[1] = 52.337
+	boundEndPoint[0] = 13.76
 
-						// lonOffset := float32(13.76)
+	projectedBoundStart := project.Point(boundStartPoint, project.WGS84.ToMercator)
+	// projectedBoundEnd := project.Point(boundEndPoint, project.WGS84.ToMercator)
 
-						startPointLat := float32(point[1])
-						startPointLon := float32(point[0])
-						endPoint := lineString[lsIndex+1]
-						endPointLat := float32(endPoint[1])
-						endPointLon := float32(endPoint[0])
+	latOffset := float32(projectedBoundStart[1])
+	lonOffset := float32(projectedBoundStart[0])
 
-						fmt.Println("==========================")
+	scaleFactor := float32(0.005)
 
-						scaleFactor := float32(300)
+	for _, feature := range parsedFC.Features {
+		if feature.Geometry.GeoJSONType() == "LineString" {
+			lineString := feature.Geometry.(orb.LineString)
+			lsLastIndex := len(lineString) - 1
+			for lsIndex, point := range lineString {
+				if lsIndex != lsLastIndex {
+					// latOffset := float32(52.337)
 
-						// lineStartPosLat := (startPointLat - latOffset) * scaleFactor
-						// lineStartPosLon := (lonOffset - startPointLon) * scaleFactor
-						// lineEndPosLat := (endPointLat - latOffset) * scaleFactor
-						// lineEndPosLon := (lonOffset - endPointLon) * scaleFactor
-						lineStartPosLat := (latOffset - startPointLat) * scaleFactor
-						lineStartPosLon := (startPointLon - lonOffset) * scaleFactor
-						lineEndPosLat := (latOffset - endPointLat) * scaleFactor
-						lineEndPosLon := (endPointLon - lonOffset) * scaleFactor
+					endPoint := lineString[lsIndex+1]
 
-						fmt.Println(lineStartPosLat)
-						fmt.Println(lineStartPosLon)
+					projectedStartPoint := project.Point(point, project.WGS84.ToMercator)
+					projectedEndPoint := project.Point(endPoint, project.WGS84.ToMercator)
 
-						fmt.Println(lineEndPosLat)
-						fmt.Println(lineEndPosLon)
+					// lonOffset := float32(13.76)
 
-						line := canvas.NewLine(color.White)
-						// line.Move(fyne.NewPos(lineStartPosLat, lineStartPosLon))
-						// line.Resize(fyne.NewSize(lineEndPosLat-lineStartPosLat, lineEndPosLon-lineStartPosLon))
-						line.Move(fyne.NewPos(lineStartPosLon, lineStartPosLat))
-						line.Resize(fyne.NewSize(lineEndPosLon-lineStartPosLon, lineEndPosLat-lineStartPosLat))
-						lines = append(lines, *line)
-						fmt.Println(line.Position())
-						fmt.Println(line.Size())
-					}
+					startPointLat := float32(projectedStartPoint[1])
+					startPointLon := float32(projectedStartPoint[0])
+					endPointLat := float32(projectedEndPoint[1])
+					endPointLon := float32(projectedEndPoint[0])
+
+					// lineStartPosLat := (startPointLat - latOffset) * scaleFactor
+					// lineStartPosLon := (lonOffset - startPointLon) * scaleFactor
+					// lineEndPosLat := (endPointLat - latOffset) * scaleFactor
+					// lineEndPosLon := (lonOffset - endPointLon) * scaleFactor
+					lineStartPosLat := (latOffset - startPointLat) * scaleFactor
+					lineStartPosLon := (startPointLon - lonOffset) * scaleFactor
+					lineEndPosLat := (latOffset - endPointLat) * scaleFactor
+					lineEndPosLon := (endPointLon - lonOffset) * scaleFactor
+
+					line := canvas.NewLine(color.White)
+					// line.Move(fyne.NewPos(lineStartPosLat, lineStartPosLon))
+					// line.Resize(fyne.NewSize(lineEndPosLat-lineStartPosLat, lineEndPosLon-lineStartPosLon))
+					line.Move(fyne.NewPos(lineStartPosLon, lineStartPosLat))
+					line.Resize(fyne.NewSize(lineEndPosLon-lineStartPosLon, lineEndPosLat-lineStartPosLat))
+					lines = append(lines, *line)
 				}
 			}
 		}
+	}
 
-		fmt.Println(content.Visible())
-		fmt.Println(content.Size())
+	fmt.Println(content.Visible())
+	fmt.Println(content.Size())
 
-		for _, line := range lines {
-			content.Add(&line)
-		}
-		content.Refresh()
-		// for _, line := range lines {
-		// 	fmt.Println("============================================================================")
-		// 	fmt.Println(line.Position1)
-		// 	fmt.Println(line.Position2)
-		// }
-	}()
+	for _, line := range lines {
+		content.Add(&line)
+	}
+	content.Refresh()
+	// for _, line := range lines {
+	// 	fmt.Println("============================================================================")
+	// 	fmt.Println(line.Position1)
+	// 	fmt.Println(line.Position2)
+	// }
 	// go func() {
 	// 	time.Sleep(time.Second)
 	//
