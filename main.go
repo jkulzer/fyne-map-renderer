@@ -5,10 +5,10 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	// "fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/widget"
 
 	"context"
-	// "time"
+	"time"
 	// "encoding/json"
 	"fmt"
 	"image/color"
@@ -20,6 +20,7 @@ import (
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geojson"
 	"github.com/paulmach/orb/project"
+	"github.com/paulmach/orb/simplify"
 
 	"github.com/rs/zerolog/log"
 )
@@ -35,57 +36,85 @@ type Geometry struct {
 	Coordinates [][]float64 `json:"coordinates"` // For LineString
 }
 
-func main() {
-	a := app.New()
-	w := a.NewWindow("Map Test")
-	jsonFromFile, err := os.ReadFile("mapdata.geojson")
-	if err != nil {
-		panic(err)
+type MapWidget struct {
+	widget.BaseWidget
+	content                 *fyne.Container
+	boundStartPoint         orb.Point
+	boundEndPoint           orb.Point
+	projectedBoundStart     orb.Point
+	latOffset               float32
+	lonOffset               float32
+	scaleFactor             float32
+	parsedFeatureCollection *geojson.FeatureCollection
+	lines                   []canvas.Line
+	grey                    color.RGBA
+	yellow                  color.RGBA
+	blue                    color.RGBA
+}
+
+func NewMapWidget(parsedFeatureCollection *geojson.FeatureCollection) *MapWidget {
+	w := &MapWidget{}
+	w.ExtendBaseWidget(w)
+
+	w.parsedFeatureCollection = parsedFeatureCollection
+
+	w.content = container.NewWithoutLayout()
+
+	w.yellow = color.RGBA{
+		R: 255,
+		G: 236,
+		B: 66,
+		A: 255,
 	}
-
-	parsedFC, _ := geojson.UnmarshalFeatureCollection(jsonFromFile)
-	// parsedFC, _ := geojson.UnmarshalFeatureCollection(rawJSON)
-	// _, _ = geojson.UnmarshalFeatureCollection(rawJSON)
-
-	log.Info().Msg("finished processing of OSM data")
-
-	// ============================================================
-
-	// green := color.NRGBA{R: 0, G: 180, B: 0, A: 255}
-	//
-	// line1 := canvas.NewLine(color.White)
-	//
-	// line2 := canvas.NewLine(green)
-	// line2.Move(fyne.NewPos(10, 10))
-	// line2.Resize(fyne.NewSize(20, 20))
-	// content := container.NewWithoutLayout(line1, line2)
-
-	content := container.NewWithoutLayout()
-
-	w.SetContent(content)
-
-	// time.Sleep(time.Millisecond * 10)
-	var lines []canvas.Line
+	w.grey = color.RGBA{
+		R: 150,
+		G: 150,
+		B: 150,
+		A: 255,
+	}
+	w.blue = color.RGBA{
+		R: 100,
+		G: 218,
+		B: 250,
+		A: 255,
+	}
+	fmt.Println(w.parsedFeatureCollection.BBox)
 
 	// contentSize := content.Size()
+	w.boundStartPoint[1] = 52.678 // latitude
+	w.boundStartPoint[0] = 13.079 // longitude
 
-	var boundStartPoint orb.Point
-	var boundEndPoint orb.Point
-	boundStartPoint[1] = 52.678 // latitude
-	boundStartPoint[0] = 13.079 // longitude
+	w.boundEndPoint[1] = 52.337
+	w.boundEndPoint[0] = 13.76
 
-	boundEndPoint[1] = 52.337
-	boundEndPoint[0] = 13.76
-
-	projectedBoundStart := project.Point(boundStartPoint, project.WGS84.ToMercator)
+	w.projectedBoundStart = project.Point(w.boundStartPoint, project.WGS84.ToMercator)
 	// projectedBoundEnd := project.Point(boundEndPoint, project.WGS84.ToMercator)
 
-	latOffset := float32(projectedBoundStart[1])
-	lonOffset := float32(projectedBoundStart[0])
+	w.latOffset = float32(w.projectedBoundStart[1])
+	w.lonOffset = float32(w.projectedBoundStart[0])
 
-	scaleFactor := float32(0.005)
+	w.scaleFactor = float32(0.005)
 
-	for _, feature := range parsedFC.Features {
+	// w.content = container.NewVBox(container.NewScroll(w.content))
+	go func() {
+		time.Sleep(time.Second)
+		w.Refresh()
+
+	}()
+
+	return w
+}
+
+func (w *MapWidget) CreateRenderer() fyne.WidgetRenderer {
+	w.content = container.NewWithoutLayout()
+
+	rect := canvas.NewRectangle(w.grey)
+	widgetSize := w.content.Size()
+	rect.FillColor = w.grey
+	rect.Move(fyne.NewPos(0, 0))
+	rect.Resize(widgetSize)
+
+	for _, feature := range w.parsedFeatureCollection.Features {
 		if feature.Geometry.GeoJSONType() == "LineString" {
 			lineString := feature.Geometry.(orb.LineString)
 			lsLastIndex := len(lineString) - 1
@@ -105,50 +134,71 @@ func main() {
 					endPointLat := float32(projectedEndPoint[1])
 					endPointLon := float32(projectedEndPoint[0])
 
-					// lineStartPosLat := (startPointLat - latOffset) * scaleFactor
-					// lineStartPosLon := (lonOffset - startPointLon) * scaleFactor
-					// lineEndPosLat := (endPointLat - latOffset) * scaleFactor
-					// lineEndPosLon := (lonOffset - endPointLon) * scaleFactor
-					lineStartPosLat := (latOffset - startPointLat) * scaleFactor
-					lineStartPosLon := (startPointLon - lonOffset) * scaleFactor
-					lineEndPosLat := (latOffset - endPointLat) * scaleFactor
-					lineEndPosLon := (endPointLon - lonOffset) * scaleFactor
+					lineStartPosLat := (w.latOffset - startPointLat) * w.scaleFactor
+					lineStartPosLon := (startPointLon - w.lonOffset) * w.scaleFactor
+					lineEndPosLat := (w.latOffset - endPointLat) * w.scaleFactor
+					lineEndPosLon := (endPointLon - w.lonOffset) * w.scaleFactor
 
-					line := canvas.NewLine(color.White)
-					// line.Move(fyne.NewPos(lineStartPosLat, lineStartPosLon))
-					// line.Resize(fyne.NewSize(lineEndPosLat-lineStartPosLat, lineEndPosLon-lineStartPosLon))
+					line := canvas.NewLine(w.grey)
+
 					line.Move(fyne.NewPos(lineStartPosLon, lineStartPosLat))
 					line.Resize(fyne.NewSize(lineEndPosLon-lineStartPosLon, lineEndPosLat-lineStartPosLat))
-					lines = append(lines, *line)
+
+					switch feature.Properties["category"] {
+					case "subway":
+						line.StrokeColor = w.yellow
+						line.StrokeWidth = 3
+					case "light_rail":
+						line.StrokeWidth = 3
+						line.StrokeColor = w.yellow
+					case "water":
+						line.StrokeWidth = 1
+						line.StrokeColor = w.blue
+					case "primary_highway":
+						line.StrokeWidth = 2
+						line.StrokeColor = w.grey
+					case "secondary_highway":
+						line.StrokeWidth = 1
+						line.StrokeColor = w.grey
+					case "tertiary_highway":
+						line.StrokeWidth = 1
+						line.StrokeColor = w.grey
+					}
+
+					w.lines = append(w.lines, *line)
 				}
 			}
 		}
 	}
+	fmt.Println("test")
 
-	fmt.Println(content.Visible())
-	fmt.Println(content.Size())
-
-	for _, line := range lines {
-		content.Add(&line)
+	for _, line := range w.lines {
+		w.content.Add(&line)
 	}
-	content.Refresh()
-	// for _, line := range lines {
-	// 	fmt.Println("============================================================================")
-	// 	fmt.Println(line.Position1)
-	// 	fmt.Println(line.Position2)
-	// }
-	// go func() {
-	// 	time.Sleep(time.Second)
-	//
-	// 	line := canvas.NewLine(color.White)
-	// 	// line.Move(fyne.NewPos(1, 1))
-	// 	// line.Resize(fyne.NewSize(2, 2))
-	// 	w.SetContent(line)
-	// 	line.Position1 = fyne.NewPos(10, 10)
-	// 	line.Position2 = fyne.NewPos(200, 200)
-	// 	fmt.Println(line.Position1)
-	// 	fmt.Println(line.Position2)
-	// }()
+
+	w.content.Refresh()
+	return widget.NewSimpleRenderer(w.content)
+}
+
+func main() {
+	a := app.New()
+	w := a.NewWindow("Map Test")
+
+	writeGeoJSON()
+
+	// jsonFromFile, err := os.ReadFile("simple.geojson")
+	jsonFromFile, err := os.ReadFile("mapdata.geojson")
+	if err != nil {
+		panic(err)
+	}
+
+	parsedFC, _ := geojson.UnmarshalFeatureCollection(jsonFromFile)
+	// parsedFC, _ := geojson.UnmarshalFeatureCollection(rawJSON)
+	// _, _ = geojson.UnmarshalFeatureCollection(rawJSON)
+
+	w.SetContent(NewMapWidget(parsedFC))
+
+	log.Info().Msg("finished processing of OSM data")
 
 	w.ShowAndRun()
 }
@@ -166,8 +216,19 @@ func writeGeoJSON() {
 	ways := make(map[osm.WayID]*osm.Way)
 	relations := make(map[osm.RelationID]*osm.Relation)
 
-	trainTracks := make(map[osm.WayID]*osm.Way)
+	// subwayWays := make(map[osm.WayID]*osm.Way)
+	// sbahnWays := make(map[osm.WayID]*osm.Way)
+
+	// trainTracks := make(map[osm.WayID]*osm.Way)
 	primaryHighways := make(map[osm.WayID]*osm.Way)
+	secondaryHighways := make(map[osm.WayID]*osm.Way)
+	tertiaryHighways := make(map[osm.WayID]*osm.Way)
+	rivers := make(map[osm.WayID]*osm.Way)
+
+	subwayLines := make(map[osm.RelationID]*osm.Relation)
+	sbahnLines := make(map[osm.RelationID]*osm.Relation)
+
+	fc := geojson.NewFeatureCollection()
 
 	for scanner.Scan() {
 		// Get the next OSM object
@@ -178,40 +239,96 @@ func writeGeoJSON() {
 			nodes[v.ID] = v
 		case *osm.Way:
 			ways[v.ID] = v
-			if v.Tags.Find("railway") == "light_rail" || v.Tags.Find("railway") == "subway" || v.Tags.Find("railway") == "rail" {
-				trainTracks[v.ID] = v
+			if v.Tags.Find("waterway") == "river" {
+				rivers[v.ID] = v
 			}
-			if v.Tags.Find("highway") == "primary" {
+			highwayTag := v.Tags.Find("highway")
+			if highwayTag == "primary" {
 				primaryHighways[v.ID] = v
+			} else if highwayTag == "secondary" {
+				secondaryHighways[v.ID] = v
+			} else if highwayTag == "tertiary" {
+				tertiaryHighways[v.ID] = v
 			}
 		case *osm.Relation:
 			relations[v.ID] = v
+			routeTag := v.Tags.Find("route")
+			if routeTag == "subway" {
+				subwayLines[v.ID] = v
+			} else if routeTag == "light_rail" {
+				sbahnLines[v.ID] = v
+			}
+
 		default:
 			// Handle other OSM object types if needed
 		}
 	}
 
-	fmt.Println(len(trainTracks))
-	fc := geojson.NewFeatureCollection()
-	for _, way := range trainTracks {
-		var lineString orb.LineString
-		for _, wayNode := range way.Nodes {
-			point := nodes[wayNode.ID].Point()
-			lineString = append(lineString, point)
-		}
-		feature := geojson.NewFeature(lineString)
-		fc.Append(feature)
+	var riverCollection orb.Collection
+	var tertiaryHighwayCollection orb.Collection
+	var secondaryHighwayCollection orb.Collection
+	var primaryHighwayCollection orb.Collection
+	var subwayCollection orb.Collection
+	var lightRailCollection orb.Collection
+
+	for _, river := range rivers {
+		addToFeatureCollection(river, fc, "water", nodes, &riverCollection)
 	}
-	// for _, way := range primaryHighways {
-	// 	var lineString orb.LineString
-	// 	for _, wayNode := range way.Nodes {
-	// 		point := nodes[wayNode.ID].Point()
-	// 		lineString = append(lineString, point)
-	// 	}
-	// 	feature := geojson.NewFeature(lineString)
-	// 	fc.Append(feature)
-	// }
-	rawJSON, _ := fc.MarshalJSON()
+	for _, road := range tertiaryHighways {
+		addToFeatureCollection(road, fc, "tertiary_highway", nodes, &tertiaryHighwayCollection)
+	}
+	for _, road := range secondaryHighways {
+		addToFeatureCollection(road, fc, "secondary_highway", nodes, &secondaryHighwayCollection)
+	}
+	for _, road := range primaryHighways {
+		addToFeatureCollection(road, fc, "primary_highway", nodes, &primaryHighwayCollection)
+	}
+	simplifyWaysAndAdd(primaryHighways, fc, "primary_highway")
+	for _, subwayLine := range subwayLines {
+		for _, member := range subwayLine.Members {
+			if member.Type == "way" {
+				wayID, err := member.ElementID().WayID()
+				if err != nil {
+					log.Err(err).Msg("")
+				}
+				memberWay := ways[wayID]
+				addToFeatureCollection(memberWay, fc, "subway", nodes, &subwayCollection)
+			}
+		}
+	}
+	for _, sbahnLine := range sbahnLines {
+		for _, member := range sbahnLine.Members {
+			if member.Type == "way" {
+				wayID, err := member.ElementID().WayID()
+				if err != nil {
+					log.Err(err).Msg("")
+				}
+				memberWay := ways[wayID]
+				addToFeatureCollection(memberWay, fc, "light_rail", nodes, &lightRailCollection)
+			}
+		}
+	}
+
+	// simplifyConst := 0.001
+	simplifyConst := 0.00001
+	simplify.DouglasPeucker(simplifyConst).Collection(riverCollection)
+	simplify.DouglasPeucker(simplifyConst).Collection(tertiaryHighwayCollection)
+	simplify.DouglasPeucker(simplifyConst).Collection(secondaryHighwayCollection)
+	simplify.DouglasPeucker(simplifyConst).Collection(primaryHighwayCollection)
+	simplify.DouglasPeucker(simplifyConst).Collection(subwayCollection)
+	simplify.DouglasPeucker(simplifyConst).Collection(lightRailCollection)
+
+	featCol := geojson.NewFeatureCollection()
+	appendToFeatureCollection(riverCollection, featCol, "water")
+	appendToFeatureCollection(tertiaryHighwayCollection, featCol, "tertiary_highway")
+	appendToFeatureCollection(secondaryHighwayCollection, featCol, "secondary_highway")
+	appendToFeatureCollection(primaryHighwayCollection, featCol, "primary_highway")
+	appendToFeatureCollection(subwayCollection, featCol, "subway")
+	appendToFeatureCollection(lightRailCollection, featCol, "light_rail")
+
+	// rawJSON, _ := fc.MarshalJSON()
+	rawJSON, _ := featCol.MarshalJSON()
+	fmt.Println(len(rawJSON))
 
 	f, err := os.Create("mapdata.geojson")
 
@@ -219,5 +336,44 @@ func writeGeoJSON() {
 	_, err = f.Write(rawJSON)
 	if err != nil {
 		log.Err(err).Msg("")
+	}
+}
+
+func simplifyWaysAndAdd(ways map[osm.WayID]*osm.Way, fc *geojson.FeatureCollection, category string) {
+	var wayArray []*osm.Way
+	for _, way := range ways {
+		wayArray = append(wayArray, way)
+	}
+	wayArrLen := len(wayArray)
+	for wayIndex, way := range wayArray {
+		if wayIndex+1 < wayArrLen {
+			if way.Nodes[len(way.Nodes)-1] == wayArray[wayIndex+1].Nodes[0] {
+				fmt.Println("got it")
+			}
+		}
+	}
+}
+
+func addToFeatureCollection(way *osm.Way, fc *geojson.FeatureCollection, category string, nodes map[osm.NodeID]*osm.Node, collection *orb.Collection) {
+	var lineString orb.LineString
+	if way != nil {
+		for _, wayNode := range way.Nodes {
+			point := nodes[wayNode.ID].Point()
+			lineString = append(lineString, point)
+		}
+		threshold := 0.0000001
+		simplify.DouglasPeucker(threshold).Simplify(lineString)
+		feature := geojson.NewFeature(lineString)
+		feature.Properties["category"] = category
+		fc.Append(feature)
+		*collection = append(*collection, lineString)
+	}
+}
+
+func appendToFeatureCollection(collection orb.Collection, featCol *geojson.FeatureCollection, category string) {
+	for _, item := range collection {
+		feature := geojson.NewFeature(item)
+		feature.Properties["category"] = category
+		featCol.Append(feature)
 	}
 }
