@@ -1,17 +1,8 @@
 package main
 
 import (
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
-
 	"context"
-	"time"
-	// "encoding/json"
 	"fmt"
-	"image/color"
 	"os"
 
 	"github.com/jkulzer/osm"
@@ -19,186 +10,35 @@ import (
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geojson"
-	"github.com/paulmach/orb/project"
 	"github.com/paulmach/orb/simplify"
 
 	"github.com/rs/zerolog/log"
+	// "time"
+
+	"fyne.io/fyne/v2/app"
+	// "fyne.io/fyne/v2/container"
+	"github.com/jkulzer/fyne-map-renderer/mapWidget"
 )
-
-type GeoJSON struct {
-	Type       string      `json:"type"`
-	Geometry   Geometry    `json:"geometry"`
-	Properties interface{} `json:"properties"`
-}
-
-type Geometry struct {
-	Type        string      `json:"type"`
-	Coordinates [][]float64 `json:"coordinates"` // For LineString
-}
-
-type MapWidget struct {
-	widget.BaseWidget
-	content                 *fyne.Container
-	boundStartPoint         orb.Point
-	boundEndPoint           orb.Point
-	projectedBoundStart     orb.Point
-	latOffset               float32
-	lonOffset               float32
-	scaleFactor             float32
-	parsedFeatureCollection *geojson.FeatureCollection
-	lines                   []canvas.Line
-	grey                    color.RGBA
-	yellow                  color.RGBA
-	blue                    color.RGBA
-}
-
-func NewMapWidget(parsedFeatureCollection *geojson.FeatureCollection) *MapWidget {
-	w := &MapWidget{}
-	w.ExtendBaseWidget(w)
-
-	w.parsedFeatureCollection = parsedFeatureCollection
-
-	w.content = container.NewWithoutLayout()
-
-	w.yellow = color.RGBA{
-		R: 255,
-		G: 236,
-		B: 66,
-		A: 255,
-	}
-	w.grey = color.RGBA{
-		R: 150,
-		G: 150,
-		B: 150,
-		A: 255,
-	}
-	w.blue = color.RGBA{
-		R: 100,
-		G: 218,
-		B: 250,
-		A: 255,
-	}
-	fmt.Println(w.parsedFeatureCollection.BBox)
-
-	// contentSize := content.Size()
-	w.boundStartPoint[1] = 52.678 // latitude
-	w.boundStartPoint[0] = 13.079 // longitude
-
-	w.boundEndPoint[1] = 52.337
-	w.boundEndPoint[0] = 13.76
-
-	w.projectedBoundStart = project.Point(w.boundStartPoint, project.WGS84.ToMercator)
-	// projectedBoundEnd := project.Point(boundEndPoint, project.WGS84.ToMercator)
-
-	w.latOffset = float32(w.projectedBoundStart[1])
-	w.lonOffset = float32(w.projectedBoundStart[0])
-
-	w.scaleFactor = float32(0.005)
-
-	// w.content = container.NewVBox(container.NewScroll(w.content))
-	go func() {
-		time.Sleep(time.Second)
-		w.Refresh()
-
-	}()
-
-	return w
-}
-
-func (w *MapWidget) CreateRenderer() fyne.WidgetRenderer {
-	w.content = container.NewWithoutLayout()
-
-	rect := canvas.NewRectangle(w.grey)
-	widgetSize := w.content.Size()
-	rect.FillColor = w.grey
-	rect.Move(fyne.NewPos(0, 0))
-	rect.Resize(widgetSize)
-
-	for _, feature := range w.parsedFeatureCollection.Features {
-		if feature.Geometry.GeoJSONType() == "LineString" {
-			lineString := feature.Geometry.(orb.LineString)
-			lsLastIndex := len(lineString) - 1
-			for lsIndex, point := range lineString {
-				if lsIndex != lsLastIndex {
-					// latOffset := float32(52.337)
-
-					endPoint := lineString[lsIndex+1]
-
-					projectedStartPoint := project.Point(point, project.WGS84.ToMercator)
-					projectedEndPoint := project.Point(endPoint, project.WGS84.ToMercator)
-
-					// lonOffset := float32(13.76)
-
-					startPointLat := float32(projectedStartPoint[1])
-					startPointLon := float32(projectedStartPoint[0])
-					endPointLat := float32(projectedEndPoint[1])
-					endPointLon := float32(projectedEndPoint[0])
-
-					lineStartPosLat := (w.latOffset - startPointLat) * w.scaleFactor
-					lineStartPosLon := (startPointLon - w.lonOffset) * w.scaleFactor
-					lineEndPosLat := (w.latOffset - endPointLat) * w.scaleFactor
-					lineEndPosLon := (endPointLon - w.lonOffset) * w.scaleFactor
-
-					line := canvas.NewLine(w.grey)
-
-					line.Move(fyne.NewPos(lineStartPosLon, lineStartPosLat))
-					line.Resize(fyne.NewSize(lineEndPosLon-lineStartPosLon, lineEndPosLat-lineStartPosLat))
-
-					switch feature.Properties["category"] {
-					case "subway":
-						line.StrokeColor = w.yellow
-						line.StrokeWidth = 3
-					case "light_rail":
-						line.StrokeWidth = 3
-						line.StrokeColor = w.yellow
-					case "water":
-						line.StrokeWidth = 1
-						line.StrokeColor = w.blue
-					case "primary_highway":
-						line.StrokeWidth = 2
-						line.StrokeColor = w.grey
-					case "secondary_highway":
-						line.StrokeWidth = 1
-						line.StrokeColor = w.grey
-					case "tertiary_highway":
-						line.StrokeWidth = 1
-						line.StrokeColor = w.grey
-					}
-
-					w.lines = append(w.lines, *line)
-				}
-			}
-		}
-	}
-	fmt.Println("test")
-
-	for _, line := range w.lines {
-		w.content.Add(&line)
-	}
-
-	w.content.Refresh()
-	return widget.NewSimpleRenderer(w.content)
-}
 
 func main() {
 	a := app.New()
-	w := a.NewWindow("Map Test")
+	w := a.NewWindow("Draggable Map Example")
 
 	writeGeoJSON()
 
-	// jsonFromFile, err := os.ReadFile("simple.geojson")
 	jsonFromFile, err := os.ReadFile("mapdata.geojson")
 	if err != nil {
 		panic(err)
 	}
 
 	parsedFC, _ := geojson.UnmarshalFeatureCollection(jsonFromFile)
-	// parsedFC, _ := geojson.UnmarshalFeatureCollection(rawJSON)
-	// _, _ = geojson.UnmarshalFeatureCollection(rawJSON)
 
-	w.SetContent(NewMapWidget(parsedFC))
-
-	log.Info().Msg("finished processing of OSM data")
+	widget := mapWidget.NewMap(parsedFC)
+	// widget.Zoom(10)
+	// widget.SetPosition(38, -176)
+	// 10
+	// 38 - 176
+	w.SetContent(widget)
 
 	w.ShowAndRun()
 }
@@ -319,11 +159,12 @@ func writeGeoJSON() {
 	simplify.DouglasPeucker(simplifyConst).Collection(lightRailCollection)
 
 	featCol := geojson.NewFeatureCollection()
-	appendToFeatureCollection(riverCollection, featCol, "water")
-	appendToFeatureCollection(tertiaryHighwayCollection, featCol, "tertiary_highway")
-	appendToFeatureCollection(secondaryHighwayCollection, featCol, "secondary_highway")
-	appendToFeatureCollection(primaryHighwayCollection, featCol, "primary_highway")
-	appendToFeatureCollection(subwayCollection, featCol, "subway")
+
+	// appendToFeatureCollection(riverCollection, featCol, "water")
+	// appendToFeatureCollection(tertiaryHighwayCollection, featCol, "tertiary_highway")
+	// appendToFeatureCollection(secondaryHighwayCollection, featCol, "secondary_highway")
+	// appendToFeatureCollection(primaryHighwayCollection, featCol, "primary_highway")
+	// appendToFeatureCollection(subwayCollection, featCol, "subway")
 	appendToFeatureCollection(lightRailCollection, featCol, "light_rail")
 
 	// rawJSON, _ := fc.MarshalJSON()
